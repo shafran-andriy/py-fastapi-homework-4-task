@@ -1,4 +1,7 @@
+from io import BytesIO
+
 from fastapi import APIRouter, Depends, HTTPException, status
+from PIL import Image
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,6 +16,25 @@ from security.interfaces import JWTAuthManagerInterface
 from storages import S3StorageInterface
 
 router = APIRouter()
+
+IMAGE_EXTENSION_BY_FORMAT = {
+    "JPEG": "jpg",
+    "JPG": "jpg",
+    "PNG": "png",
+}
+
+
+def get_avatar_extension(file_data: bytes) -> str:
+    with Image.open(BytesIO(file_data)) as image:
+        image_format = image.format
+
+    if image_format not in IMAGE_EXTENSION_BY_FORMAT:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Invalid image format",
+        )
+
+    return IMAGE_EXTENSION_BY_FORMAT[image_format]
 
 
 @router.post(
@@ -85,10 +107,10 @@ async def create_user_profile(
             detail="User already has a profile.",
         )
 
-    avatar_key = f"avatars/{user_id}_avatar.jpg"
-
     try:
         avatar_data = await profile_data.avatar.read()
+        avatar_extension = get_avatar_extension(avatar_data)
+        avatar_key = f"avatars/{user_id}_avatar.{avatar_extension}"
         await s3_client.upload_file(avatar_key, avatar_data)
         avatar_url = await s3_client.get_file_url(avatar_key)
 
